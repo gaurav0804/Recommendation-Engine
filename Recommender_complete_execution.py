@@ -1,93 +1,96 @@
 #!/usr/bin/env python
+# coding: utf-8
+
+
 from keras.models import load_model
 from keras import regularizers
 import pandas as pd
 import numpy as np
 from keras.models import Sequential, Model
 from keras.layers import Embedding, Reshape, Activation, Input, Dense, Flatten, Dropout
-from keras.layers.merge import Dot, multiply, concatenate
+from keras.layers.merge import Dot, Concatenate
 from keras.utils import np_utils
 from keras.utils.data_utils import get_file
-from keras.preprocessing.text import Tokenizer
-from keras.preprocessing.sequence import skipgrams
 from collections import defaultdict
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import sys
+import sqlalchemy
+from sqlalchemy import create_engine
+import MySQLdb
+import time
+import gc
 
+
+#Define the class for various functions to read data, train, predict and write to SQL
 class read_train_model():
     
-    def __init__(self,data_path):
-        self.data_path=data_path
+    def __init__(self,sql_query):
+        self.sql_query=sql_query
         self.df_in=pd.DataFrame()
         self.df_train=pd.DataFrame()
         self.df_test=pd.DataFrame()
-        self.n_user=0
+        self.n_users=0
         self.n_posts=0
+        self.max_user=0
+        self.max_post=0
+        self.df_final=pd.DataFrame()
         
+#Read data from SQL query.
     def read_data(self):
-        self.df_in = pd.read_csv(self.data_path,sep='|')
-        self.df_in.loc[self.df_in.Likes>0,'Likes']=1
-        self.df_in.loc[self.df_in.Comments>0,'Comments']=1
-        self.df_in.loc[self.df_in.Shares>0,'Shares']=1
-        self.df_in.loc[self.df_in.Downloads>0,'Downloads']=1
-        self.df_in.loc[self.df_in.Views>0,'Views']=1
-
+        #Define define the MySQL connection
+        engine = create_engine('mysql+mysqldb://root:stick@52r@127.0.0.1:3306/ML', echo=False)
+        #Read from SQL to dataframe
+        self.SQL_Query = pd.read_sql_query(self.sql_query, engine)
+        # Define column names
+        self.df_in = pd.DataFrame(self.SQL_Query, columns=['UserId','PostId','Likes','Shares','Comments','Downloads','Views'])
+        
+        #Add various interaction columns to get a cumulative rating and dropout all columns except UserId, PostId and Rating
         self.df_in['Rating']=self.df_in['Likes']+self.df_in['Comments']+self.df_in['Shares']+self.df_in['Downloads']+self.df_in['Views']
         self.df_in.drop(['Likes','Comments','Shares','Downloads','Views'],axis=1,inplace=True)
-    
-        self.df_in.UserId = self.df_in.UserId.astype('category').cat.codes.values
-        self.df_in.PostId = self.df_in.PostId.astype('category').cat.codes.values
-
+        
+        #Split in to train test. Not required in production
         self.df_train,self.df_test =train_test_split(self.df_in, test_size = 0.1,random_state = 42 )
+        
+        #Calculate number of users, number of posts and max value of UserId and PostId
 
         self.n_users = len(self.df_in.UserId.unique()) 
         self.n_posts = len(self.df_in.PostId.unique())
+        self.max_user,self.max_post=max(self.df_in.UserId),max(self.df_in.PostId)
         
-    
-    
-    def user_post_ids(self):
-        dff = pd.read_csv(self.data_path,sep="|")
-        dff.loc[dff.Likes>0,'Likes']=1
-        dff.loc[dff.Comments>0,'Comments']=1
-        dff.loc[dff.Shares>0,'Shares']=1
-        dff.loc[dff.Downloads>0,'Downloads']=1
-        dff.loc[dff.Views>0,'Views']=1
-
-        dff['Rating']=dff['Likes']+dff['Comments']+dff['Shares']+dff['Downloads']+dff['Views']
-        dff.drop(['Likes','Comments','Shares','Downloads','Views'],axis=1,inplace=True)
-        trainn,testt = train_test_split(dff,test_size = 0.1,random_state =42)
-        
-        return trainn, testt
-
-
+# define the deep learning model
     def define_model(self):
+        #Define latent features for Posts through embedding layer
         post_input = Input(shape=[1], name="post-Input")
-        post_embedding = Embedding(self.n_posts+1,10,  name="post-Embedding")(post_input)
-        lp = Dense(10,activation = 'relu',kernel_regularizer=regularizers.l2(0.001),)(post_embedding)
+        post_embedding = Embedding(self.max_post+1,20,  name="post-Embedding")(post_input)
+        lp = Dense(20,activation = 'relu',kernel_regularizer=regularizers.l2(0.001),)(post_embedding)
         Dropout(0.4)
         post_vec = Flatten(name="Flatten-post")(lp)
-
+        
+        #Define latent features for Users through embedding layer
         user_input = Input(shape=[1], name="User-Input")
-        user_embedding = Embedding(self.n_users+1, 10, name="User-Embedding")(user_input)
-        l2 = Dense(10,activation = 'relu',kernel_regularizer=regularizers.l2(0.001))(user_embedding)
+        user_embedding = Embedding(self.max_user+1, 20, name="User-Embedding")(user_input)
+        l2 = Dense(20,activation = 'relu',kernel_regularizer=regularizers.l2(0.001))(user_embedding)
         Dropout(0.4)
         user_vec = Flatten(name="Flatten-Users")(l2)
+        
+        #Merge embedding layers of Users and Posts through dot product
+        product_layer = Dot(name="Dot",axes=1)([post_vec, user_vec])
 
-        product_layer = Dot(name="Dot-Product", axes=1)([post_vec, user_vec])
+        #Define hidden layers
+        fully_connected_layer = Dense(40,activation ='relu')(product_layer)
+        fully_connected_layer_2 = Dense(40,activation ='relu')(fully_connected_layer)
+        fully_connected_layer_3 = Dense(40,activation ='relu')(fully_connected_layer_2)
+        fully_connected_layer_4 = Dense(40,activation ='relu')(fully_connected_layer_3)
 
-        fully_connected_layer = Dense(10,activation ='relu')(product_layer)
-        fully_connected_layer_2 = Dense(10,activation ='relu')(fully_connected_layer)
-        fully_connected_layer_3 = Dense(10,activation ='relu')(fully_connected_layer_2)
-        fully_connected_layer_4 = Dense(10,activation ='relu')(fully_connected_layer_3)
-
-
+        #Define output layer
         output_connected_layer = Dense(1,activation ='linear')(fully_connected_layer_4)
-
+        
+        #Define model
         model = Model([user_input, post_input],output_connected_layer)
         model.compile(loss='mse', optimizer='adam', metrics=["mae"])
         return model
-    
+    #Train model
     def train_model(self):
         model =self.define_model()
         history = model.fit([self.df_train.UserId, self.df_train.PostId], self.df_train.Rating,validation_split=0.1 , epochs= 1, verbose=1)
@@ -99,54 +102,54 @@ class read_train_model():
         print('model loaded')
         return model
     
-    
-    def get_estimation_data(self):
-        def duplicate(testList,n ): 
-            return list(testList*n)
-                
-        n_users,n_posts,train,test=self.n_user,self.n_posts,self.df_train,self.df_test
-        trainn,testt=self.user_post_ids()
-        len_post = len(test.PostId.unique())
-        len_user= len(testt.UserId.unique())
-        p = test.PostId.unique()
-        unique_postids = p.tolist()
-        upids=duplicate(unique_postids,len_user) #post_ids_looped
-
-
-        u =test.UserId.unique()
-        unique_userids =u.tolist()
-        un = np.array(unique_userids)
-        user_loop =np.repeat(unique_userids,len_post) #user_ids_looped
-        ttpids = testt['PostId'].unique()
-        ttuid = testt['UserId'].unique()
-        pp = testt.PostId.unique()
-        uunique_postids = pp.tolist()
-        uupids=duplicate(uunique_postids,len_user) #post_ids_looped
-
-
-        uu =testt.UserId.unique()
-        uunique_userids =uu.tolist()
-        uun = np.array(uunique_userids)
-        uuser_loop =np.repeat(uunique_userids,len_post) #user_ids_looped
-        post_data = np.array(upids)
-        user = np.array(user_loop)
+    #Predict ratings
+    def predict(self):
         model=self.get_model()
-        estimations = model.predict([user, post_data]) #predictions
-   
-        pid =pd.DataFrame(uupids)  #forming dataframes
-        uid =pd.DataFrame(uuser_loop)
-        estimation =pd.DataFrame(estimations)
-        dataa = pd.merge(estimation,pid,left_index =True,right_index = True)
-        data = pd.merge(dataa,uid,left_index = True, right_index= True)
-        data.rename(columns={'0_x':'estimation','0_y':'post_id',0:'user_id'},inplace = True)
-        final_data_sorted = data.groupby(["user_id"]).apply(lambda x: x.sort_values(["estimation"], ascending = False)).reset_index(drop=True)
-        return final_data_sorted
-data_path=sys.argv[1]
-rec_model=read_train_model(data_path)
+        posts=self.df_in['PostId'].unique()
+        users=self.df_in['UserId'].unique()
+        users_index=np.repeat(users,len(posts))
+        posts_index=np.tile(posts,len(users))
+        
+        split_factor=(len(users_index)//100000)+1
+        
+        posts_array=np.array_split(posts_index,split_factor)
+        users_array=np.array_split(users_index,split_factor)
+        
+        est=[]
+        st=time.time()
+        for i in range(split_factor):
+            est_current=model.predict([users_array[i],posts_array[i]])
+            est.append(est_current)
+            print(i)
+        
+        est1=np.concatenate( est, axis=0 )
+        est1=est1.reshape(len(est1))
+        self.df_final=pd.DataFrame({'UserId':users_index,'PostId':posts_index,'EstimatedRating':est1})
+        en=time.time()
+        print('Predicted and written in df in: '+str(en-st))
+        #df_final.to_csv('/home/msf/final_output.csv')
+        
+    #Save dataframe to SQL table
+    def write_to_sql(self):
+        engine = create_engine('mysql+mysqldb://root:stick@52r@127.0.0.1:3306/ML', echo=False)
+        st=time.time()
+        df_final=self.df_final
+        try:
+            df_final.to_sql('users_posts_pred', con=engine ,if_exists='replace',chunksize = 10000)
+            del df_final
+            gc.collect()
+        except:
+            print('error :',sys.exc_info()[0])
+            raise
+        finally:
+            en=time.time()
+            print('total time to write SQL :'+str(en-st))
+        
+
+sql_query= 'select * from WallData'#sys.argv[1]
+rec_model=read_train_model(sql_query)
 rec_model.read_data()
 rec_model.define_model()
 rec_model.train_model()
-df_out=rec_model.get_estimation_data()
-df_out.to_csv('/home/gaurav/RecOut.csv')
-print('Output saved as : /home/gaurav/RecOut.csv')
-
+rec_model.predict()
+rec_model.write_to_sql()
