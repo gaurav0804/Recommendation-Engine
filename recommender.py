@@ -36,10 +36,8 @@ class read_train_model():
         engine = create_engine(self.sql_connection, echo=False)
         self.SQL_Query = pd.read_sql_query(self.sql_query, engine)
         
-        self.df_in = pd.DataFrame(self.SQL_Query, columns=['UserId','PostId','Likes','Shares','Comments','Downloads','Views'])
-        self.df_in['Rating']=self.df_in['Likes']+self.df_in['Comments']+self.df_in['Shares']+self.df_in['Downloads']+self.df_in['Views']
-        self.df_in.drop(['Likes','Comments','Shares','Downloads','Views'],axis=1,inplace=True)
- 
+        self.df_in = pd.DataFrame(self.SQL_Query, columns=['UserId','PostId','Rating'])
+        
         self.df_train,self.df_test =train_test_split(self.df_in, test_size = 0.1,random_state = 42 )
         
         self.n_users = len(self.df_in.UserId.unique()) 
@@ -78,6 +76,7 @@ class read_train_model():
         model = load_model('recommender_model.h5')
         print('model loaded')
         return model
+    #predict and keep predictions in a DataFrame
     def predict(self):
 
         model=self.get_model()
@@ -102,6 +101,8 @@ class read_train_model():
         df_final=pd.DataFrame({'UserId':users_index,'PostId':posts_index,'EstimatedRating':est1})
        
         return df_final
+    
+    #predict and write predictions in a MySQL table
     def predict_2(self):
         model=self.get_model()
         engine = create_engine(self.sql_connection, echo=False)
