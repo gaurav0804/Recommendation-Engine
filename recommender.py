@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[4]:
 
-
-#!/usr/bin/env python3
 
 from keras.models import load_model
 from keras import regularizers
