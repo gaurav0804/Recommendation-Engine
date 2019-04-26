@@ -70,7 +70,7 @@ class read_train_model():
         model =self.define_model()
         training = model.fit([self.df_train.UserId, self.df_train.PostId], self.df_train.Rating, epochs= 30, verbose=1)
         model.save('recommender_model.h5')
-        return history
+        return training
     
     def get_model(self):
         model = load_model('recommender_model.h5')
