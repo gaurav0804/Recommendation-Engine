@@ -73,7 +73,7 @@ class read_train_model():
     
     def train_model(self):
         model =self.define_model()
-        history = model.fit([self.df_train.UserId, self.df_train.PostId], self.df_train.Rating, epochs= 30, verbose=1)
+        training = model.fit([self.df_train.UserId, self.df_train.PostId], self.df_train.Rating, epochs= 30, verbose=1)
         model.save('recommender_model.h5')
         return history
     
@@ -98,7 +98,7 @@ class read_train_model():
         for i in range(split_factor):
             est_current=model.predict([users_array[i],posts_array[i]])
             est.append(est_current)
-            print(i)
+            print(str(i)+' of '+str(split_factor-1))
         
         est1=np.concatenate( est, axis=0 )
         est1=est1.reshape(len(est1))
@@ -110,9 +110,9 @@ class read_train_model():
         engine = create_engine(self.sql_connection, echo=False)
         post= self.df_in.PostId.unique()
         user= self.df_in.UserId.unique()
-        pids=np.random.choice(post, len(post)//4)
-        users_=np.repeat(user,len(pids))
-        posts_=np.tile(pids,len(user))
+        #pids=np.random.choice(post, len(post)//4)
+        users_=np.repeat(user,len(post))
+        posts_=np.tile(post,len(user))
         
         split_factor=(len(users_)//100000)+1
         
@@ -123,7 +123,7 @@ class read_train_model():
         for i in range(split_factor):
             est_curr=model.predict([users_arr[i],posts_arr[i]])
             esti.append(est_curr)
-            print(i)
+            print(str(i)+' of '+str(split_factor-1))
         
         est11=np.concatenate(esti, axis=0 )
         est11=est11.reshape(len(est11))
@@ -146,16 +146,5 @@ rec_model.read_data()
 rec_model.define_model()
 rec_model.train_model()
 sorted_data=rec_model.predict_2()
-
-
-# In[5]:
-
-
-#sorted_data
-
-
-# In[ ]:
-
-
 
 
